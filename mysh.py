@@ -38,6 +38,7 @@ def main() -> None:
 
         parsed = []
 
+
         for i in split:
             s = shlex.shlex(i, posix=True)
             s.whitespace_split = True
@@ -48,6 +49,10 @@ def main() -> None:
             except ValueError:
                 sys.stderr.write("mysh: syntax error: unterminated quote\n")
                 sys.stderr.flush()
+
+        if any(len(sublist) == 0 for sublist in parsed):
+            sys.stderr.write("mysh: syntax error: expected command after pipe\n")
+            continue
 
         if parsing.run_built_in(parsed):
             continue
