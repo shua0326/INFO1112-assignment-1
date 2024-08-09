@@ -100,8 +100,6 @@ def run_exec(command):
         else:
             os.execv(path + '/' + filename)
 
-    return
-
 def run_built_in(command_line):
     for i in command_line:
         match_built_in(i)
@@ -128,11 +126,12 @@ def match_built_in(command):
             return
 
         case "exit":
-            pass
+            exit_cmd(command)
+            return
 
         case _:
             run_exec(command)
-            pass
+            return
 
 def var(var_command):
 
@@ -174,22 +173,19 @@ def pwd(command):
         if command[1] == '-P':
             print(os.path.realpath(os.environ['PWD']))
             return
+        if command[1][0] == '-':
+            sys.stderr.write("pwd: invalid option: " + command[1] + "\n")
         else:
-            if command[1][0] == '-':
-                sys.stderr.write("pwd: invalid option: " + command[1] + "\n")
-            else:
-                sys.stderr.write("pwd: not expecting any arguments\n")
-            return
-    else:
-        print(os.environ['PWD'])
+            sys.stderr.write("pwd: not expecting any arguments\n")
+        return
+    print(os.environ['PWD'])
 
 def cd(command):
-    print(os.environ['PATH'])
     if len(command) > 2:
         sys.stderr.write("cd: too many arguments\n")
         return
     if len(command) == 1:
-        os.environ['PWD'] = os.environ['home_dir']
+        os.environ['PWD'] = os.environ['HOME']
         return
     path = command[1]
     if os.path.isabs(path):
@@ -199,17 +195,18 @@ def cd(command):
     if not os.path.exists(abspath):
         sys.stderr.write('cd: no such file or directory: ' + abspath + '\n')
         return
-    elif not os.path.isdir(abspath):
+    if not os.path.isdir(abspath):
         sys.stderr.write('cd: not a directory: ' + abspath + '\n')
         return
-    elif not os.access(abspath, os.X_OK):
+    if not os.access(abspath, os.X_OK):
         sys.stderr.write('cd: permission denied: ' + abspath + '\n')
         return
-    else:
-        os.environ['PWD'] = abspath
-        return
+    os.environ['PWD'] = abspath
+    return
 
 def which(command):
+
+    print(os.environ['HOME'])
 
     built_in_commands = ['var', 'pwd', 'cd', 'which', 'exit']
 
@@ -217,11 +214,33 @@ def which(command):
         sys.stderr.write('usage: which command ...\n')
         return
 
+    path_dirs = os.environ['PATH'].split(os.pathsep)
+
+    print(path_dirs)
+
     if command[1] in built_in_commands:
         sys.stdout.write(command[1] + ': shell built-in command\n')
-    elif re.search(r'bin', os.environ['PATH']):
+    elif command[1] in os.environ['PATH']:
+        for i in path_dirs:
+            if re.search(command[1] + r'$', i):
+                sys.stdout.write(i + '\n')
+                return
         command_path = os.environ['PATH']
-        path_command = re.sub(r'[^:.*appleinternal$]', '', command_path)
+        path_command = re.fullmatch(r'.*/bin', '', command_path)
         sys.stdout.write(path_command + '\n')
     else:
         sys.stdout.write(command[1] + ' not found\n')
+
+def exit_cmd(command):
+    if len(command) > 2:
+        sys.stderr.write("exit: too many arguments\n")
+        return
+    if len(command) == 2:
+        try:
+            exit_code = int(command[1])
+        except ValueError:
+            sys.stderr.write("exit: non-integer exit code provided: " + command[1] + "\n")
+            return
+        sys.exit(exit_code)
+    else:
+        sys.exit(0)

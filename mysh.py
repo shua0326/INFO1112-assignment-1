@@ -1,9 +1,10 @@
 import os
 import signal
 import sys
+import shlex
 
 import parsing
-import shlex
+
 
 
 # DO NOT REMOVE THIS FUNCTION!
@@ -24,7 +25,6 @@ def main() -> None:
     # Start your code here!
 
     os.environ["PWD"] = os.getcwd()
-    os.environ['home_dir'] = os.getcwd()
 
     while True:
 
@@ -32,8 +32,6 @@ def main() -> None:
         try:
             prompt = input(">>")
         except EOFError:
-            break
-        if prompt == "exit":
             break
 
         split = parsing.split_by_pipe_op(prompt)
