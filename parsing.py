@@ -3,6 +3,7 @@ Module to handle parsing for the shell.
 """
 import os
 import re
+import shlex
 import sys
 
 # You are free to add functions or modify this module as you please.
@@ -87,6 +88,25 @@ def split_by_pipe_op(cmd_str: str) -> list[str]:
     # Return string list
     return split_str
 
+def format(commands):
+    parsed = []
+
+
+    for i in commands:
+        s = shlex.shlex(i, posix=True)
+        s.whitespace_split = True
+        s.escapedquotes = "'\""
+        s.quotes = "'\""
+        s.escape = ''
+        s.wordchars += '\\'
+        try :
+            parsed.append(list(s))
+        except ValueError:
+            sys.stderr.write("mysh: syntax error: unterminated quote\n")
+            sys.stderr.flush()
+
+    return parsed
+
 def run_exec(command):
 
     if re.search(r'[/]', command[0]):
@@ -164,7 +184,13 @@ def run_exec(command):
             os.waitpid(child_pid, 0)
             os.tcsetpgrp(fd, parent_pgid)
 
-def run_built_in(command_line):
+def run_commands(command_line):
+    if len(command_line) == 1:
+        match_built_in(command_line[0])
+        return True
+
+
+
     for i in command_line:
         match_built_in(i)
     return True
@@ -214,7 +240,41 @@ def var(var_command):
             sys.stderr.write("var: expected 2 arguments, got " + str(len(var_command)) + "\n")
             return
         var_name = var_command[0]
-        var_value = ' '.join(var_command[1:]) #needs to run the command given and obtain the output
+        command_str = var_command[1]
+
+        # Split and parse the command string
+        split_commands = split_by_pipe_op(command_str)
+        parsed_commands = format(split_commands)
+
+        # Execute the commands using os.fork and os.execvp
+        num_commands = len(parsed_commands)
+        pipe_fds = []
+
+        for i in range(num_commands - 1):
+            read_fd, write_fd = os.pipe()
+            pipe_fds.append((read_fd, write_fd))
+
+        for i, cmd in enumerate(parsed_commands):
+            pid = os.fork()
+            if pid == 0:
+                # Child process
+                if i > 0:
+                    os.dup2(pipe_fds[i - 1][0], sys.stdin.fileno())
+                if i < num_commands - 1:
+                    os.dup2(pipe_fds[i][1], sys.stdout.fileno())
+                os.execvp(cmd[0], cmd)
+                sys.exit(1)
+            else:
+                # Parent process
+                if i > 0:
+                    os.close(pipe_fds[i - 1][0])
+                if i < num_commands - 1:
+                    os.close(pipe_fds[i][1])
+
+        var_value = ""
+        with os.fdopen(pipe_fds[-1][0]) as pipe:
+            var_value = pipe.read().strip()
+        os.waitpid(pid, 0)
     else:
         var_command.remove('var')
         if len(var_command) != 2:
@@ -235,17 +295,17 @@ def var(var_command):
 def pwd(command):
     if len(command) != 1:
         if command[1] == '-P':
-            print(os.path.realpath(os.environ['PWD']))
+            sys.stdout.write(os.path.realpath(os.environ['PWD']) + '\n')
             return
         if command[1][0] == '-':
             sys.stderr.write("pwd: invalid option: " + command[1] + "\n")
         else:
             sys.stderr.write("pwd: not expecting any arguments\n")
         return
-    print(os.environ['PWD'])
+    sys.stdout.write(os.environ['PWD'] + '\n')
 
 def cd(command):
-    print(os.environ['PATH'])
+
     if len(command) > 2:
         sys.stderr.write("cd: too many arguments\n")
         return
@@ -253,6 +313,12 @@ def cd(command):
         os.environ['PWD'] = os.environ['HOME']
         return
     path = command[1]
+    if path == '..':
+        os.environ['PWD'] = os.path.dirname(os.environ['PWD'])
+        return
+    if path == '~':
+        os.environ['PWD'] = os.environ['HOME']
+        return
     if os.path.isabs(path):
         abspath = path
     else:
@@ -261,7 +327,7 @@ def cd(command):
         sys.stderr.write('cd: no such file or directory: ' + abspath + '\n')
         return
     if not os.path.isdir(abspath):
-        sys.stderr.write('cd: not a directory: ' + abspath + '\n')
+        sys.stderr.write('cd: not a directory: ' + command[1] + '\n')
         return
     if not os.access(abspath, os.X_OK):
         sys.stderr.write('cd: permission denied: ' + abspath + '\n')
@@ -271,8 +337,6 @@ def cd(command):
 
 def which(command):
 
-    print(os.environ['HOME'])
-
     built_in_commands = ['var', 'pwd', 'cd', 'which', 'exit']
 
     if len(command) < 2:
@@ -280,8 +344,6 @@ def which(command):
         return
 
     path_dirs = os.environ['PATH'].split(os.pathsep)
-
-    print(path_dirs)
 
     if command[1] in built_in_commands:
         sys.stdout.write(command[1] + ': shell built-in command\n')

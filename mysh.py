@@ -30,36 +30,30 @@ def main() -> None:
 
 
         try:
-            prompt = input(">>")
+            prompt = input(">> ")
         except EOFError:
+            sys.stdout.write("\n")
             break
+
+
 
         split = parsing.split_by_pipe_op(prompt)
 
-        parsed = []
+        parsed = parsing.format(split)
 
-
-        for i in split:
-            s = shlex.shlex(i, posix=True)
-            s.whitespace_split = True
-            s.escapedquotes = "'\""
-            s.quotes = "'\""
-            s.escape = ''
-            s.wordchars += '\\'
-            try :
-                parsed.append(list(s))
-            except ValueError:
-                sys.stderr.write("mysh: syntax error: unterminated quote\n")
-                sys.stderr.flush()
 
         if any(len(sublist) == 0 for sublist in parsed):
             sys.stderr.write("mysh: syntax error: expected command after pipe\n")
             continue
 
-        if parsing.run_built_in(parsed):
+        print(parsed)
+
+        os.execvp(parsed[0][0], parsed[0])
+
+
+
+        if parsing.run_commands(parsed):
             continue
-
-
 
 if __name__ == "__main__":
     main()
