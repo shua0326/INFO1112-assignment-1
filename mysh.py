@@ -48,8 +48,6 @@ def main() -> None:
 
         print(parsed)
 
-        os.execvp(parsed[0][0], parsed[0])
-
 
 
         if parsing.run_commands(parsed):

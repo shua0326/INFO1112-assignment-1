@@ -107,6 +107,39 @@ def format(commands):
 
     return parsed
 
+def check_variable(command):
+    checked_variables = []
+    checked_variables.append(command[0])
+    arguments = command[1:]
+    for i in arguments:
+        if re.search(r'\\\${.*?}', i):
+            fixed_command = re.sub(r'[\\]', '', i)
+        elif re.search(r'\${.*?}', i):
+            variable = re.search(r'\${(.*?)}', i).group(1)
+            if not re.match(r'^[A-Za-z0-9_]+$', variable):
+                sys.stderr.write(f"mysh: syntax error: invalid characters for variable {variable}\n")
+                return
+            try:
+                fixed_command = re.sub(r'\${' + variable + '}', os.environ[variable], i)
+            except KeyError:
+                fixed_command = re.sub(r'\${' + variable + '}', '', i)
+        else:
+            fixed_command = i
+
+        checked_variables.append(fixed_command)
+
+    return checked_variables
+
+def create_pipes(commands):
+    num_commands = len(commands)
+    pipe_fds = []
+
+    for i in range(num_commands - 1):
+        read_fd, write_fd = os.pipe()
+        pipe_fds.append((read_fd, write_fd))
+
+    return pipe_fds
+
 def run_exec(command):
 
     if re.search(r'[/]', command[0]):
@@ -151,27 +184,8 @@ def run_exec(command):
         if len(command) == 1:
             os.execv(path + '/' + filename, [filename])
         else:
-            checked_variables = []
-            checked_variables.append(command[0])
-            arguments = command[1:]
-            for i in arguments:
-                if re.search(r'\\\${.*?}', i):
-                    fixed_command = re.sub(r'[\\]', '', i)
-                elif re.search(r'\${.*?}', i):
-                    variable = re.search(r'\${(.*?)}', i).group(1)
-                    if not re.match(r'^[A-Za-z0-9_]+$', variable):
-                        sys.stderr.write(f"mysh: syntax error: invalid characters for variable {variable}\n")
-                        return
-                    try:
-                        fixed_command = re.sub(r'\${' + variable + '}', os.environ[variable], i)
-                    except KeyError:
-                        fixed_command = re.sub(r'\${' + variable + '}', '', i)
-                else:
-                    fixed_command = i
+            os.execv(path + '/' + filename, command)
 
-                checked_variables.append(fixed_command)
-
-            os.execv(path + '/' + filename, checked_variables)
     else:
         # Parent process
         os.setpgid(child_pid, child_pid)
@@ -184,18 +198,74 @@ def run_exec(command):
             os.waitpid(child_pid, 0)
             os.tcsetpgrp(fd, parent_pgid)
 
+    return
+
 def run_commands(command_line):
+
+    pid = ""
+
     if len(command_line) == 1:
         match_built_in(command_line[0])
         return True
 
+    pipe_fds = create_pipes(command_line)
+    built_in_commands = ['var', 'pwd', 'cd', 'which', 'exit']
+
+    original_stdout_fd = sys.stdout.fileno()
+
+    for i, cmd in enumerate(command_line):
 
 
-    for i in command_line:
-        match_built_in(i)
+
+        if cmd[0] in built_in_commands:
+            match_built_in(cmd)
+            continue
+
+        pid = os.fork()
+        if pid == 0:
+            # Child process
+            if i > 0:
+                os.dup2(pipe_fds[i - 1][0], sys.stdin.fileno())
+            if i < len(command_line) - 1:
+                os.dup2(pipe_fds[i][1], sys.stdout.fileno())
+
+            os.execvp(cmd[0], cmd)
+
+        else:
+            if i == len(command_line):
+                # r = os.fdopen(pipe_fds[-1][0])
+                # print("Read text:", r.read())
+                os.dup2(sys.stdout.fileno(), pipe_fds[-1][1])
+
+            elif i > 0:
+                #os.close(pipe_fds[i - 1][0])
+                po=0
+            elif i < len(command_line) - 1:
+                os.close(pipe_fds[i][1])
+                po=0
+
+            r = os.open(sys.stdout.fileno(), os.O_RDONLY)
+            print("Read text:", r.read())
+
+
+
+
+
+            os.setpgid(pid, pid)
+            pid = os.getpgid(pid)
+            parent_pgid = os.getpgrp()
+
+            with open('/dev/tty') as tty:
+                fd = tty.fileno()
+                os.tcsetpgrp(fd, pid)
+                os.waitpid(pid, 0)
+                os.tcsetpgrp(fd, parent_pgid)
+
     return True
 
 def match_built_in(command):
+
+    command = check_variable(command)
 
 
     match command[0]:
@@ -225,7 +295,6 @@ def match_built_in(command):
 
 def var(var_command):
 
-
     # Check for the -s flag
     if var_command[1][0] == '-':
         if var_command[1] != '-s':
@@ -242,39 +311,23 @@ def var(var_command):
         var_name = var_command[0]
         command_str = var_command[1]
 
+
         # Split and parse the command string
         split_commands = split_by_pipe_op(command_str)
         parsed_commands = format(split_commands)
 
-        # Execute the commands using os.fork and os.execvp
-        num_commands = len(parsed_commands)
-        pipe_fds = []
 
-        for i in range(num_commands - 1):
-            read_fd, write_fd = os.pipe()
-            pipe_fds.append((read_fd, write_fd))
+        if len(parsed_commands) == 1:
+            run_commands(parsed_commands)
+            return
 
-        for i, cmd in enumerate(parsed_commands):
-            pid = os.fork()
-            if pid == 0:
-                # Child process
-                if i > 0:
-                    os.dup2(pipe_fds[i - 1][0], sys.stdin.fileno())
-                if i < num_commands - 1:
-                    os.dup2(pipe_fds[i][1], sys.stdout.fileno())
-                os.execvp(cmd[0], cmd)
-                sys.exit(1)
-            else:
-                # Parent process
-                if i > 0:
-                    os.close(pipe_fds[i - 1][0])
-                if i < num_commands - 1:
-                    os.close(pipe_fds[i][1])
+        run_commands(parsed_commands)
 
-        var_value = ""
-        with os.fdopen(pipe_fds[-1][0]) as pipe:
-            var_value = pipe.read().strip()
-        os.waitpid(pid, 0)
+        return
+
+
+
+
     else:
         var_command.remove('var')
         if len(var_command) != 2:
