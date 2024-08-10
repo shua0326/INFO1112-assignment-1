@@ -88,17 +88,81 @@ def split_by_pipe_op(cmd_str: str) -> list[str]:
     return split_str
 
 def run_exec(command):
+
     if re.search(r'[/]', command[0]):
         filename = re.sub(r'^./', '', command[0])
+
         path = os.environ['PWD']
+
+        if not os.path.exists(path + '/' + filename):
+            sys.stderr.write('mysh: no such file or directory: ' + command[0] + '\n')
+            return
+
         if os.path.isdir(path + '/' + filename):
             sys.stderr.write('mysh: ' + filename + ' is a directory\n')
-        elif not os.path.exists(path + '/' + filename):
-            sys.stderr.write('mysh: no such file or directory: ' + filename + '\n')
-        elif not os.access(path + '/' + filename, os.X_OK):
+            return
+
+        if not os.access(path + '/' + filename, os.X_OK):
             sys.stderr.write('mysh: permission denied: ' + filename + '\n')
+            return
+    else:
+        filename = re.sub(r'^./', '', command[0])
+        paths = os.environ['PATH'].split(os.pathsep)
+        existing_path = []
+        for path in paths:
+            if not os.path.exists(path + '/' + filename):
+                continue
+            else:
+                existing_path.append(path)
+
+        if not existing_path:
+            sys.stderr.write('mysh: command not found: ' + filename + '\n')
+            return
+
+        path = existing_path[0]
+
+        if os.path.isdir(path + '/' + filename):
+            sys.stderr.write('mysh: ' + filename + ' is a directory\n')
+            return
+
+    child_pid = os.fork()
+    if child_pid == 0:
+        # Child process
+        if len(command) == 1:
+            os.execv(path + '/' + filename, [filename])
         else:
-            os.execv(path + '/' + filename)
+            checked_variables = []
+            checked_variables.append(command[0])
+            arguments = command[1:]
+            for i in arguments:
+                if re.search(r'\\\${.*?}', i):
+                    fixed_command = re.sub(r'[\\]', '', i)
+                elif re.search(r'\${.*?}', i):
+                    variable = re.search(r'\${(.*?)}', i).group(1)
+                    if not re.match(r'^[A-Za-z0-9_]+$', variable):
+                        sys.stderr.write(f"mysh: syntax error: invalid characters for variable {variable}\n")
+                        return
+                    try:
+                        fixed_command = re.sub(r'\${' + variable + '}', os.environ[variable], i)
+                    except KeyError:
+                        fixed_command = re.sub(r'\${' + variable + '}', '', i)
+                else:
+                    fixed_command = i
+
+                checked_variables.append(fixed_command)
+
+            os.execv(path + '/' + filename, checked_variables)
+    else:
+        # Parent process
+        os.setpgid(child_pid, child_pid)
+        child_pgid = os.getpgid(child_pid)
+        parent_pgid = os.getpgrp()
+
+        with open('/dev/tty') as tty:
+            fd = tty.fileno()
+            os.tcsetpgrp(fd, child_pgid)
+            os.waitpid(child_pid, 0)
+            os.tcsetpgrp(fd, parent_pgid)
 
 def run_built_in(command_line):
     for i in command_line:
@@ -181,6 +245,7 @@ def pwd(command):
     print(os.environ['PWD'])
 
 def cd(command):
+    print(os.environ['PATH'])
     if len(command) > 2:
         sys.stderr.write("cd: too many arguments\n")
         return

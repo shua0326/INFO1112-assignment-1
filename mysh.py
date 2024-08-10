@@ -44,6 +44,8 @@ def main() -> None:
             s.whitespace_split = True
             s.escapedquotes = "'\""
             s.quotes = "'\""
+            s.escape = ''
+            s.wordchars += '\\'
             try :
                 parsed.append(list(s))
             except ValueError:
