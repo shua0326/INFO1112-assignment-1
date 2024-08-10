@@ -46,8 +46,6 @@ def main() -> None:
             sys.stderr.write("mysh: syntax error: expected command after pipe\n")
             continue
 
-        print(parsed)
-
 
 
         if parsing.run_commands(parsed):

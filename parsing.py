@@ -200,66 +200,70 @@ def run_exec(command):
 
     return
 
-def run_commands(command_line):
+def pipe_command(command, newin, newout):
+    pid = os.fork()
+    if pid == 0:
+        # Child process
+        os.dup2(newin, 0)  # Replace stdin
+        os.dup2(newout, 1)  # Replace stdout
+        os.execvp(command[0], command)
+    else:
+        # parent
+        os.setpgid(pid, pid)
+        child_pgid = os.getpgid(pid)
+        parent_pgid = os.getpgrp()
 
-    pid = ""
+        with open('/dev/tty') as tty:
+            fd = tty.fileno()
+            os.tcsetpgrp(fd, child_pgid)
+            os.waitpid(pid, 0)
+            os.tcsetpgrp(fd, parent_pgid)
+        return pid
 
-    if len(command_line) == 1:
-        match_built_in(command_line[0])
-        return True
+def run_command_and_capture_output(command):
 
-    pipe_fds = create_pipes(command_line)
+    num_commands = len(command)
+    pipe_fds = []
+
+
     built_in_commands = ['var', 'pwd', 'cd', 'which', 'exit']
 
-    original_stdout_fd = sys.stdout.fileno()
+    for i in range(num_commands):
+        read_fd, write_fd = os.pipe()
+        pipe_fds.append((read_fd, write_fd))
 
-    for i, cmd in enumerate(command_line):
+    child_processes = []
 
+    for i, cmd in enumerate(command):
 
+        cmd = check_variable(cmd)
 
         if cmd[0] in built_in_commands:
             match_built_in(cmd)
             continue
 
-        pid = os.fork()
-        if pid == 0:
-            # Child process
-            if i > 0:
-                os.dup2(pipe_fds[i - 1][0], sys.stdin.fileno())
-            if i < len(command_line) - 1:
-                os.dup2(pipe_fds[i][1], sys.stdout.fileno())
-
-            os.execvp(cmd[0], cmd)
-
+        if i == 0:
+            child_processes.append(pipe_command(cmd, pipe_fds[i][0], pipe_fds[i][1]))
         else:
-            if i == len(command_line):
-                # r = os.fdopen(pipe_fds[-1][0])
-                # print("Read text:", r.read())
-                os.dup2(sys.stdout.fileno(), pipe_fds[-1][1])
+            child_processes.append(pipe_command(cmd, pipe_fds[i-1][0], pipe_fds[i][1]))
 
-            elif i > 0:
-                #os.close(pipe_fds[i - 1][0])
-                po=0
-            elif i < len(command_line) - 1:
-                os.close(pipe_fds[i][1])
-                po=0
+        os.close(pipe_fds[i][1])
 
-            r = os.open(sys.stdout.fileno(), os.O_RDONLY)
-            print("Read text:", r.read())
+    with os.fdopen(pipe_fds[i][0]) as r:
+        output = r.read().strip()
+        os.environ['OUTPUT'] = output
+        return
+
+def run_commands(command_line):
 
 
+    if len(command_line) == 1:
+        match_built_in(command_line[0])
+        return True
 
 
+    output = run_command_and_capture_output(command_line)
 
-            os.setpgid(pid, pid)
-            pid = os.getpgid(pid)
-            parent_pgid = os.getpgrp()
-
-            with open('/dev/tty') as tty:
-                fd = tty.fileno()
-                os.tcsetpgrp(fd, pid)
-                os.waitpid(pid, 0)
-                os.tcsetpgrp(fd, parent_pgid)
 
     return True
 
@@ -317,16 +321,14 @@ def var(var_command):
         parsed_commands = format(split_commands)
 
 
+
         if len(parsed_commands) == 1:
             run_commands(parsed_commands)
             return
 
-        run_commands(parsed_commands)
 
-        return
-
-
-
+        run_command_and_capture_output(parsed_commands)
+        sys.stdout.write(os.environ['OUTPUT'] + '\n')
 
     else:
         var_command.remove('var')
@@ -335,15 +337,15 @@ def var(var_command):
 
             return
         var_name, var_value = var_command
+        os.environ['OUTPUT'] = var_value
 
     # Validate variable name
     if not re.match(r'^[A-Za-z0-9_]+$', var_name):
         sys.stderr.write(f"var: invalid characters for variable {var_name}\n")
-
         return
 
     # Set the environment variable
-    os.environ[var_name] = var_value
+    os.environ[var_name] = os.environ['OUTPUT']
 
 def pwd(command):
     if len(command) != 1:
