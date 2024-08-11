@@ -5,7 +5,6 @@ import os
 import re
 import shlex
 import sys
-from os import remove
 
 # You are free to add functions or modify this module as you please.
 
@@ -124,6 +123,7 @@ def check_variable(command):
                 fixed_command = re.sub(r'\${' + variable + '}', os.environ[variable], i)
             except KeyError:
                 fixed_command = re.sub(r'\${' + variable + '}', '', i)
+
         else:
             if re.search(r'^~', i):
                 i = re.sub(r'~', os.environ['HOME'], i)

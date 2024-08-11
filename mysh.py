@@ -1,7 +1,8 @@
+import json
 import os
+import re
 import signal
 import sys
-import shlex
 
 import parsing
 
@@ -25,6 +26,33 @@ def main() -> None:
     # Start your code here!
 
     os.environ["PWD"] = os.getcwd()
+
+    try:
+        path = os.environ['MYSHDOTDIR']
+    except KeyError:
+        path = os.environ['HOME']
+
+
+    path += '/.myshrc'
+    try:
+        with open(path, 'r') as init_file:
+            lines = json.load(init_file)
+
+        for variable_name, value in lines.items():
+            if not re.match(r'^[A-Za-z0-9_]+$', variable_name):
+                sys.stderr.write(f"mysh: .myshrc: {variable_name}: invalid characters for variable name\n")
+                continue
+            if not re.match(r'[A-Za-z]', variable_name):
+                sys.stderr.write(f"mysh: .myshrc: {variable_name}: not a string\n")
+                continue
+            os.environ[variable_name] = value
+
+    except json.decoder.JSONDecodeError:
+        sys.stderr.write("mysh: invalid JSON format for .myshrc\n")
+
+    except FileNotFoundError:
+        pass
+
 
     while True:
 
