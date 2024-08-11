@@ -143,52 +143,60 @@ def create_pipes(commands):
 
     return pipe_fds
 
+def check_file_exists(filename):
+    is_command = False
+
+    if re.search(r'[/]', filename):
+        filename = re.sub(r'^./', '', filename)
+    else:
+        is_command = True
+
+    path = os.environ['PWD']
+
+    paths = os.environ['PATH'].split(os.pathsep)
+    paths.append(path)
+    existing_path = []
+
+    for i in paths:
+        for root, dirs, files in os.walk(i):
+            if filename in files:
+                existing_path.append(os.path.join(root, filename))
+
+    if not existing_path:
+        if is_command:
+            sys.stderr.write('mysh: command not found: ' + filename + '\n')
+            return existing_path, False
+        sys.stderr.write('mysh: no such file or directory: ' + filename + '\n')
+        return existing_path, False
+
+    path = existing_path[0]
+
+    if os.path.isdir(path):
+        sys.stderr.write('mysh: ' + filename + ' is a directory\n')
+        return existing_path, False
+
+    if not os.access(path, os.X_OK):
+        sys.stderr.write('mysh: permission denied: ' + filename + '\n')
+        return existing_path, False
+
+    return path, True
+
 def run_exec(command):
 
-    if re.search(r'[/]', command[0]):
-        filename = re.sub(r'^./', '', command[0])
+    filename = command[0]
 
-        path = os.environ['PWD']
+    path, found_file = check_file_exists(filename)
 
-        if not os.path.exists(path + '/' + filename):
-
-            sys.stderr.write('mysh: no such file or directory: ' + command[0] + '\n')
-            return
-
-        if os.path.isdir(path + '/' + filename):
-            sys.stderr.write('mysh: ' + filename + ' is a directory\n')
-            return
-
-        if not os.access(path + '/' + filename, os.X_OK):
-            sys.stderr.write('mysh: permission denied: ' + filename + '\n')
-            return
-    else:
-        filename = re.sub(r'^./', '', command[0])
-        paths = os.environ['PATH'].split(os.pathsep)
-        existing_path = []
-        for path in paths:
-            if not os.path.exists(path + '/' + filename):
-                continue
-            else:
-                existing_path.append(path)
-
-        if not existing_path:
-            sys.stderr.write('mysh: command not found: ' + filename + '\n')
-            return
-
-        path = existing_path[0]
-
-        if os.path.isdir(path + '/' + filename):
-            sys.stderr.write('mysh: ' + filename + ' is a directory\n')
-            return
+    if not found_file:
+        return
 
     child_pid = os.fork()
     if child_pid == 0:
         # Child process
         if len(command) == 1:
-            os.execv(path + '/' + filename, [filename])
+            os.execv(path, [filename])
         else:
-            os.execv(path + '/' + filename, command)
+            os.execv(path, command)
 
     else:
         # Parent process
@@ -243,6 +251,10 @@ def run_piped_command(command):
             match_built_in(cmd)
             continue
 
+        path, cmd_exists = check_file_exists(cmd[0])
+        if not cmd_exists:
+            return
+
         if i == 0:
             child_processes.append(pipe_command(cmd, pipe_fds[i][0], pipe_fds[i][1]))
         elif i == num_commands - 1:
@@ -275,6 +287,10 @@ def run_command_and_capture_output(command):
         if cmd[0] in built_in_commands:
             match_built_in(cmd)
             continue
+
+        path, cmd_exists = check_file_exists(cmd[0])
+        if not cmd_exists:
+            return
 
         if i == 0:
             child_processes.append(pipe_command(cmd, pipe_fds[i][0], pipe_fds[i][1]))
@@ -436,17 +452,15 @@ def which(command):
         if i in built_in_commands:
             sys.stdout.write(i + ': shell built-in command\n')
             continue
-        if os.path.exists(os.environ['PWD'] + '/' + i):
-            sys.stdout.write(os.environ['PWD'] + '/' + i + '\n')
-            continue
-        found_in_path = False
-        for path in path_dirs:
-            if os.path.exists(path + '/' + i):
-                found_in_path = True
-                sys.stdout.write(path + '/' + i + '\n')
-                break
+
+        sys.stderr = open(os.devnull, 'w')
+
+        path, found_in_path = check_file_exists(i)
+
+        sys.stderr = sys.__stderr__
 
         if found_in_path:
+            sys.stdout.write(path + '\n')
             continue
 
         sys.stdout.write(i + ' not found\n')
