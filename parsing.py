@@ -5,6 +5,7 @@ import os
 import re
 import shlex
 import sys
+from os import remove
 
 # You are free to add functions or modify this module as you please.
 
@@ -124,6 +125,8 @@ def check_variable(command):
             except KeyError:
                 fixed_command = re.sub(r'\${' + variable + '}', '', i)
         else:
+            if re.search(r'^~', i):
+                re.sub(r'^~', os.environ['HOME'], i)
             fixed_command = i
 
         checked_variables.append(fixed_command)
@@ -220,6 +223,38 @@ def pipe_command(command, newin, newout):
             os.tcsetpgrp(fd, parent_pgid)
         return pid
 
+def run_piped_command(command):
+    num_commands = len(command)
+    pipe_fds = []
+
+    built_in_commands = ['var', 'pwd', 'cd', 'which', 'exit']
+
+    for i in range(num_commands):
+        read_fd, write_fd = os.pipe()
+        pipe_fds.append((read_fd, write_fd))
+
+    child_processes = []
+
+    for i, cmd in enumerate(command):
+        cmd = check_variable(cmd)
+
+        if cmd[0] in built_in_commands:
+            match_built_in(cmd)
+            continue
+
+        if i == 0:
+            child_processes.append(pipe_command(cmd, pipe_fds[i][0], pipe_fds[i][1]))
+        elif i == num_commands - 1:
+            # Final command, execute directly
+            child_processes.append(pipe_command(cmd, pipe_fds[i-1][0], 1))
+            # Replace stdin with the read end of the previous pipe
+
+        else:
+            child_processes.append(pipe_command(cmd, pipe_fds[i-1][0], pipe_fds[i][1]))
+
+        os.close(pipe_fds[i][1])
+
+
 def run_command_and_capture_output(command):
 
     num_commands = len(command)
@@ -262,7 +297,7 @@ def run_commands(command_line):
         return True
 
 
-    output = run_command_and_capture_output(command_line)
+    run_piped_command(command_line)
 
 
     return True
@@ -321,14 +356,7 @@ def var(var_command):
         parsed_commands = format(split_commands)
 
 
-
-        if len(parsed_commands) == 1:
-            run_commands(parsed_commands)
-            return
-
-
         run_command_and_capture_output(parsed_commands)
-        sys.stdout.write(os.environ['OUTPUT'] + '\n')
 
     else:
         var_command.remove('var')
@@ -400,18 +428,27 @@ def which(command):
 
     path_dirs = os.environ['PATH'].split(os.pathsep)
 
-    if command[1] in built_in_commands:
-        sys.stdout.write(command[1] + ': shell built-in command\n')
-    elif command[1] in os.environ['PATH']:
-        for i in path_dirs:
-            if re.search(command[1] + r'$', i):
-                sys.stdout.write(i + '\n')
-                return
-        command_path = os.environ['PATH']
-        path_command = re.fullmatch(r'.*/bin', '', command_path)
-        sys.stdout.write(path_command + '\n')
-    else:
-        sys.stdout.write(command[1] + ' not found\n')
+    arguments = command[1:]
+
+    for i in arguments:
+
+        if i in built_in_commands:
+            sys.stdout.write(i + ': shell built-in command\n')
+            continue
+        if os.path.exists(os.environ['PWD'] + '/' + i):
+            sys.stdout.write(os.environ['PWD'] + '/' + i + '\n')
+            continue
+        found_in_path = False
+        for path in path_dirs:
+            if os.path.exists(path + '/' + i):
+                found_in_path = True
+                sys.stdout.write(path + '/' + i + '\n')
+                break
+
+        if found_in_path:
+            continue
+
+        sys.stdout.write(i + ' not found\n')
 
 def exit_cmd(command):
     if len(command) > 2:
