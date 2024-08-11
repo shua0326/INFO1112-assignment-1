@@ -126,7 +126,7 @@ def check_variable(command):
                 fixed_command = re.sub(r'\${' + variable + '}', '', i)
         else:
             if re.search(r'^~', i):
-                re.sub(r'^~', os.environ['HOME'], i)
+                i = re.sub(r'~', os.environ['HOME'], i)
             fixed_command = i
 
         checked_variables.append(fixed_command)
@@ -151,6 +151,7 @@ def run_exec(command):
         path = os.environ['PWD']
 
         if not os.path.exists(path + '/' + filename):
+
             sys.stderr.write('mysh: no such file or directory: ' + command[0] + '\n')
             return
 
@@ -259,8 +260,6 @@ def run_command_and_capture_output(command):
 
     num_commands = len(command)
     pipe_fds = []
-
-
     built_in_commands = ['var', 'pwd', 'cd', 'which', 'exit']
 
     for i in range(num_commands):
@@ -306,6 +305,8 @@ def match_built_in(command):
 
     command = check_variable(command)
 
+    if command == None:
+        return
 
     match command[0]:
         case "var":
