@@ -89,9 +89,6 @@ def split_by_pipe_op(cmd_str: str) -> list[str]:
     # Return string list
     return split_str
 
-def signal_handler(signum, frame):
-    return True
-
 def format(commands):
     parsed = []
     for i in commands:
@@ -106,7 +103,6 @@ def format(commands):
         except ValueError:
             sys.stderr.write("mysh: syntax error: unterminated quote\n")
             sys.stderr.flush()
-
     return parsed
 
 def check_variable(command):
@@ -204,6 +200,8 @@ def run_exec(command):
         os.close(w)
         signal = os.read(r, 1)
         os.close(r)
+
+        #waits for parent to finish setting new process group before executing
         while not signal:
             signal = os.read(r, 1)
 
@@ -236,6 +234,8 @@ def pipe_command(command, newin, newout):
         os.close(w)
         signal = os.read(r, 1)
         os.close(r)
+
+        #waits for parent to finish setting new process group before executing
         while not signal:
             signal = os.read(r, 1)
 
@@ -269,18 +269,15 @@ def run_piped_command(raw_command):
     num_commands = len(command)
     pipe_fds = []
 
-    built_in_commands = ['var', 'pwd', 'cd', 'which', 'exit']
-
     for i in range(num_commands):
         read_fd, write_fd = os.pipe()
         pipe_fds.append((read_fd, write_fd))
 
-    child_processes = []
 
     for i, cmd in enumerate(command):
         cmd = check_variable(cmd)
 
-        if cmd[0] in built_in_commands:
+        if check_if_built_in(cmd[0]):
             match_built_in(cmd)
             continue
 
@@ -289,34 +286,33 @@ def run_piped_command(raw_command):
             return
 
         if i == 0:
-            child_processes_pid = (pipe_command(cmd, pipe_fds[i][0], pipe_fds[i][1]))
+            pipe_command(cmd, pipe_fds[i][0], pipe_fds[i][1])
         elif i == num_commands - 1:
             # Final command, execute directly
-            child_processes_pid = (pipe_command(cmd, pipe_fds[i-1][0], 1))
-            # Replace stdin with the read end of the previous pipe
+            pipe_command(cmd, pipe_fds[i-1][0], 1)
+
         else:
-            child_processes.append(pipe_command(cmd, pipe_fds[i-1][0], pipe_fds[i][1]))
+            pipe_command(cmd, pipe_fds[i-1][0], pipe_fds[i][1])
 
         os.close(pipe_fds[i][1])
+
+    return
 
 
 def run_command_and_capture_output(command):
 
     num_commands = len(command)
     pipe_fds = []
-    built_in_commands = ['var', 'pwd', 'cd', 'which', 'exit']
 
     for i in range(num_commands):
         read_fd, write_fd = os.pipe()
         pipe_fds.append((read_fd, write_fd))
 
-    child_processes = []
-
     for i, cmd in enumerate(command):
 
         cmd = check_variable(cmd)
 
-        if cmd[0] in built_in_commands:
+        if check_if_built_in(cmd[0]):
             match_built_in(cmd)
             continue
 
@@ -325,17 +321,17 @@ def run_command_and_capture_output(command):
             return
 
         if i == 0:
-            child_processes.append(pipe_command(cmd, pipe_fds[i][0], pipe_fds[i][1]))
+            pipe_command(cmd, pipe_fds[i][0], pipe_fds[i][1])
         else:
-            child_processes.append(pipe_command(cmd, pipe_fds[i-1][0], pipe_fds[i][1]))
+            pipe_command(cmd, pipe_fds[i-1][0], pipe_fds[i][1])
 
         os.close(pipe_fds[i][1])
 
-
+    #output of the last command is captured and placed into the environment variable 'OUTPUT'
     with os.fdopen(pipe_fds[i][0]) as r:
         output = r.read().strip()
         os.environ['OUTPUT'] = output
-        return
+    return
 
 def run_commands(command_line):
 
@@ -343,11 +339,17 @@ def run_commands(command_line):
         match_built_in(command_line[0])
         return True
 
-
     run_piped_command(command_line)
     return True
 
+def check_if_built_in(command):
+    if command in ['var', 'pwd', 'cd', 'which', 'exit']:
+        return True
+    return False
+
 def match_built_in(command):
+
+    #runs the appropriate command for any unpiped commands
 
     command = check_variable(command)
 
@@ -380,14 +382,12 @@ def match_built_in(command):
             return
 
 def var(var_command):
-
     # Check for the -s flag
     if var_command[1][0] == '-':
         if var_command[1] != '-s':
             error = re.sub(r's', '', var_command[1])
             if error:
                 sys.stderr.write("var: invalid option: " + error + "\n")
-
             return
         var_command.remove('-s')
         var_command.remove('var')
@@ -401,8 +401,7 @@ def var(var_command):
         # Split and parse the command string
         split_commands = split_by_pipe_op(command_str)
         parsed_commands = format(split_commands)
-
-
+        #runs piped commands and places output into environment variable 'OUTPUT'
         run_command_and_capture_output(parsed_commands)
 
     else:
@@ -466,19 +465,15 @@ def cd(command):
 
 def which(command):
 
-    built_in_commands = ['var', 'pwd', 'cd', 'which', 'exit']
-
     if len(command) < 2:
         sys.stderr.write('usage: which command ...\n')
         return
-
-    path_dirs = os.environ['PATH'].split(os.pathsep)
 
     arguments = command[1:]
 
     for i in arguments:
 
-        if i in built_in_commands:
+        if check_if_built_in(i):
             sys.stdout.write(i + ': shell built-in command\n')
             continue
 

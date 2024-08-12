@@ -53,9 +53,7 @@ def main() -> None:
     except FileNotFoundError:
         pass
 
-
     while True:
-
 
         try:
             prompt = input(">> ")
@@ -67,12 +65,9 @@ def main() -> None:
 
         parsed = parsing.format(split)
 
-
         if any(len(sublist) == 0 for sublist in parsed):
             sys.stderr.write("mysh: syntax error: expected command after pipe\n")
             continue
-
-
 
         if parsing.run_commands(parsed):
             continue
