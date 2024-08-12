@@ -63,8 +63,6 @@ def main() -> None:
             sys.stdout.write("\n")
             break
 
-
-
         split = parsing.split_by_pipe_op(prompt)
 
         parsed = parsing.format(split)

@@ -4,6 +4,7 @@ Module to handle parsing for the shell.
 import os
 import re
 import shlex
+import signal
 import sys
 
 # You are free to add functions or modify this module as you please.
@@ -32,7 +33,7 @@ def split_by_pipe_op(cmd_str: str) -> list[str]:
     """
     Split a string by an unquoted pipe operator ('|').
 
-    The logic for this function was derived from 
+    The logic for this function was derived from
     https://www.rexegg.com/regex-best-trick.php#notarzan.
 
     >>> split_by_pipe_op("a | b")
@@ -88,10 +89,11 @@ def split_by_pipe_op(cmd_str: str) -> list[str]:
     # Return string list
     return split_str
 
+def signal_handler(signum, frame):
+    return True
+
 def format(commands):
     parsed = []
-
-
     for i in commands:
         s = shlex.shlex(i, posix=True)
         s.whitespace_split = True
@@ -144,40 +146,44 @@ def create_pipes(commands):
     return pipe_fds
 
 def check_file_exists(filename):
-    is_command = False
 
-    if re.search(r'[/]', filename):
-        filename = re.sub(r'^./', '', filename)
+    if re.search(r'^./', filename):
+        cwd_path = os.environ['PWD']
+        path = os.path.join(cwd_path, filename)
+        if not os.path.exists(path):
+            sys.stderr.write('mysh: no such file or directory: ' + filename + '\n')
+            return path, False
+    elif re.search(r'[/]', filename):
+        path = filename
+        if not os.path.exists(path):
+            sys.stderr.write('mysh: no such file or directory: ' + filename + '\n')
+            return path, False
     else:
-        is_command = True
+        existing_path = []
+        paths = os.environ['PATH'].split(os.pathsep)
+        path = ""
+        found_dir = False
+        for i in paths:
+            for root, dirs, files in os.walk(i):
+                if filename in files:
+                    existing_path.append(os.path.join(root, filename))
+                if filename in root:
+                    found_dir = True
 
-    path = os.environ['PWD']
+        if existing_path:
+            path = existing_path[0]
 
-    paths = os.environ['PATH'].split(os.pathsep)
-    paths.append(path)
-    existing_path = []
+        if found_dir and not path:
+            sys.stderr.write('mysh: ' + filename + ' is a directory\n')
+            return path, False
 
-    for i in paths:
-        for root, dirs, files in os.walk(i):
-            if filename in files:
-                existing_path.append(os.path.join(root, filename))
-
-    if not existing_path:
-        if is_command:
+        if not path:
             sys.stderr.write('mysh: command not found: ' + filename + '\n')
-            return existing_path, False
-        sys.stderr.write('mysh: no such file or directory: ' + filename + '\n')
-        return existing_path, False
-
-    path = existing_path[0]
-
-    if os.path.isdir(path):
-        sys.stderr.write('mysh: ' + filename + ' is a directory\n')
-        return existing_path, False
+            return path, False
 
     if not os.access(path, os.X_OK):
         sys.stderr.write('mysh: permission denied: ' + filename + '\n')
-        return existing_path, False
+        return path, False
 
     return path, True
 
@@ -190,37 +196,24 @@ def run_exec(command):
     if not found_file:
         return
 
-    child_pid = os.fork()
-    if child_pid == 0:
+    r, w = os.pipe()
+
+    pid = os.fork()
+    if pid == 0:
         # Child process
+        os.close(w)
+        signal = os.read(r, 1)
+        os.close(r)
+        while not signal:
+            signal = os.read(r, 1)
+
         if len(command) == 1:
             os.execv(path, [filename])
         else:
             os.execv(path, command)
-
     else:
         # Parent process
-        os.setpgid(child_pid, child_pid)
-        child_pgid = os.getpgid(child_pid)
-        parent_pgid = os.getpgrp()
-
-        with open('/dev/tty') as tty:
-            fd = tty.fileno()
-            os.tcsetpgrp(fd, child_pgid)
-            os.waitpid(child_pid, 0)
-            os.tcsetpgrp(fd, parent_pgid)
-
-    return
-
-def pipe_command(command, newin, newout):
-    pid = os.fork()
-    if pid == 0:
-        # Child process
-        os.dup2(newin, 0)  # Replace stdin
-        os.dup2(newout, 1)  # Replace stdout
-        os.execvp(command[0], command)
-    else:
-        # parent
+        os.close(r)
         os.setpgid(pid, pid)
         child_pgid = os.getpgid(pid)
         parent_pgid = os.getpgrp()
@@ -228,11 +221,51 @@ def pipe_command(command, newin, newout):
         with open('/dev/tty') as tty:
             fd = tty.fileno()
             os.tcsetpgrp(fd, child_pgid)
-            os.waitpid(pid, 0)
+            os.write(w, b'1')  # Write to the pipe to signal the child
+            os.close(w)
+            os.waitpid(child_pgid, 0)
             os.tcsetpgrp(fd, parent_pgid)
-        return pid
 
-def run_piped_command(command):
+    return
+
+def pipe_command(command, newin, newout):
+    r, w = os.pipe()
+    pid = os.fork()
+    if pid == 0:
+        # Child process
+        os.close(w)
+        signal = os.read(r, 1)
+        os.close(r)
+        while not signal:
+            signal = os.read(r, 1)
+
+        os.dup2(newin, 0)  # Replace stdin
+        os.dup2(newout, 1)  # Replace stdout
+        os.execvp(command[0], command)
+    else:
+        # parent
+        os.close(r)
+        os.setpgid(pid, pid)
+        child_pgid = os.getpgid(pid)
+        parent_pgid = os.getpgrp()
+
+        with open('/dev/tty') as tty:
+            fd = tty.fileno()
+            os.tcsetpgrp(fd, child_pgid)
+            os.write(w, b'1')  # Write to the pipe to signal the child
+            os.close(w)
+            os.waitpid(child_pgid, 0)
+            os.tcsetpgrp(fd, parent_pgid)
+    return pid
+
+def run_piped_command(raw_command):
+
+    command = []
+
+    for i in raw_command:
+        checked = check_variable(i)
+        command.append(checked)
+
     num_commands = len(command)
     pipe_fds = []
 
@@ -256,12 +289,11 @@ def run_piped_command(command):
             return
 
         if i == 0:
-            child_processes.append(pipe_command(cmd, pipe_fds[i][0], pipe_fds[i][1]))
+            child_processes_pid = (pipe_command(cmd, pipe_fds[i][0], pipe_fds[i][1]))
         elif i == num_commands - 1:
             # Final command, execute directly
-            child_processes.append(pipe_command(cmd, pipe_fds[i-1][0], 1))
+            child_processes_pid = (pipe_command(cmd, pipe_fds[i-1][0], 1))
             # Replace stdin with the read end of the previous pipe
-
         else:
             child_processes.append(pipe_command(cmd, pipe_fds[i-1][0], pipe_fds[i][1]))
 
@@ -299,6 +331,7 @@ def run_command_and_capture_output(command):
 
         os.close(pipe_fds[i][1])
 
+
     with os.fdopen(pipe_fds[i][0]) as r:
         output = r.read().strip()
         os.environ['OUTPUT'] = output
@@ -306,15 +339,12 @@ def run_command_and_capture_output(command):
 
 def run_commands(command_line):
 
-
     if len(command_line) == 1:
         match_built_in(command_line[0])
         return True
 
 
     run_piped_command(command_line)
-
-
     return True
 
 def match_built_in(command):
@@ -356,7 +386,7 @@ def var(var_command):
         if var_command[1] != '-s':
             error = re.sub(r's', '', var_command[1])
             if error:
-                sys.stderr.write("var: invalid option " + error + "\n")
+                sys.stderr.write("var: invalid option: " + error + "\n")
 
             return
         var_command.remove('-s')
@@ -379,7 +409,6 @@ def var(var_command):
         var_command.remove('var')
         if len(var_command) != 2:
             sys.stderr.write("var: expected 2 arguments, got " + str(len(var_command)) + "\n")
-
             return
         var_name, var_value = var_command
         os.environ['OUTPUT'] = var_value
@@ -394,11 +423,11 @@ def var(var_command):
 
 def pwd(command):
     if len(command) != 1:
-        if command[1] == '-P':
+        if command[1].lower() == '-p':
             sys.stdout.write(os.path.realpath(os.environ['PWD']) + '\n')
             return
         if command[1][0] == '-':
-            sys.stderr.write("pwd: invalid option: " + command[1] + "\n")
+            sys.stderr.write("pwd: invalid option: " + command[1].replace('p', '') + "\n")
         else:
             sys.stderr.write("pwd: not expecting any arguments\n")
         return
