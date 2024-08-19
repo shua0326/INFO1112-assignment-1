@@ -373,7 +373,7 @@ def match_single_command(command):
 
 def var(var_command):
     # Validate variable name
-
+    
 
     # Check for the -s flag
     if var_command[1][0] == '-':

@@ -49,9 +49,9 @@ def initialise_shell() -> None:
         pass
 
     try:
-        os.environ['PROMPT']
+        os.environ['PATH']
     except KeyError:
-        os.environ['PROMPT'] = '>> '
+        os.environ['PATH'] = os.defpath
 
 
 def main() -> None:
