@@ -89,15 +89,15 @@ def split_by_pipe_op(cmd_str: str) -> list[str]:
     # Return string list
     return split_str
 
-def format(commands):
+def split_and_format_arguments(commands):
     parsed = []
     for i in commands:
         s = shlex.shlex(i, posix=True)
         s.whitespace_split = True
-        s.escapedquotes = "'\""
-        s.quotes = "'\""
+        # s.escapedquotes = "'\""
+        # s.quotes = "'\""
         s.escape = ''
-        s.wordchars += '\\'
+        # s.wordchars += '\\'
         try :
             parsed.append(list(s))
         except ValueError:
@@ -105,7 +105,7 @@ def format(commands):
             sys.stderr.flush()
     return parsed
 
-def check_variable(command):
+def check_for_variables(command):
     checked_variables = []
     checked_variables.append(command[0])
     arguments = command[1:]
@@ -130,16 +130,6 @@ def check_variable(command):
         checked_variables.append(fixed_command)
 
     return checked_variables
-
-def create_pipes(commands):
-    num_commands = len(commands)
-    pipe_fds = []
-
-    for i in range(num_commands - 1):
-        read_fd, write_fd = os.pipe()
-        pipe_fds.append((read_fd, write_fd))
-
-    return pipe_fds
 
 def check_file_exists(filename):
 
@@ -252,33 +242,39 @@ def pipe_command(command, newin, newout):
         with open('/dev/tty') as tty:
             fd = tty.fileno()
             os.tcsetpgrp(fd, child_pgid)
-            os.write(w, b'1')  # Write to the pipe to signal the child
+            os.write(w, b'1')  # Write to the pipe to signal the child to continue
             os.close(w)
             os.waitpid(child_pgid, 0)
             os.tcsetpgrp(fd, parent_pgid)
-    return pid
+    return
 
-def run_piped_command(raw_command):
-
-    command = []
-
-    for i in raw_command:
-        checked = check_variable(i)
-        command.append(checked)
-
-    num_commands = len(command)
+def create_pipes(commands):
+    num_commands = len(commands)
     pipe_fds = []
 
     for i in range(num_commands):
         read_fd, write_fd = os.pipe()
         pipe_fds.append((read_fd, write_fd))
 
+    return pipe_fds
 
-    for i, cmd in enumerate(command):
-        cmd = check_variable(cmd)
+def run_piped_commands(raw_command):
 
-        if check_if_built_in(cmd[0]):
-            match_built_in(cmd)
+    commands = []
+
+    for i in raw_command:
+        checked = check_for_variables(i)
+        commands.append(checked)
+
+    num_commands = len(commands)
+
+    pipe_fds = create_pipes(commands)
+
+    for i, cmd in enumerate(commands):
+        cmd = check_for_variables(cmd)
+
+        if check_if_built_in_command(cmd[0]):
+            match_single_command(cmd)
             continue
 
         path, cmd_exists = check_file_exists(cmd[0])
@@ -298,22 +294,16 @@ def run_piped_command(raw_command):
 
     return
 
+def run_commands_and_capture_output(command):
 
-def run_command_and_capture_output(command):
-
-    num_commands = len(command)
-    pipe_fds = []
-
-    for i in range(num_commands):
-        read_fd, write_fd = os.pipe()
-        pipe_fds.append((read_fd, write_fd))
+    pipe_fds = create_pipes(command)
 
     for i, cmd in enumerate(command):
 
-        cmd = check_variable(cmd)
+        cmd = check_for_variables(cmd)
 
-        if check_if_built_in(cmd[0]):
-            match_built_in(cmd)
+        if check_if_built_in_command(cmd[0]):
+            match_single_command(cmd)
             continue
 
         path, cmd_exists = check_file_exists(cmd[0])
@@ -336,22 +326,22 @@ def run_command_and_capture_output(command):
 def run_commands(command_line):
 
     if len(command_line) == 1:
-        match_built_in(command_line[0])
+        match_single_command(command_line[0])
         return True
 
-    run_piped_command(command_line)
+    run_piped_commands(command_line)
     return True
 
-def check_if_built_in(command):
+def check_if_built_in_command(command):
     if command in ['var', 'pwd', 'cd', 'which', 'exit']:
         return True
     return False
 
-def match_built_in(command):
+def match_single_command(command):
 
     #runs the appropriate command for any unpiped commands
 
-    command = check_variable(command)
+    command = check_for_variables(command)
 
     if command == None:
         return
@@ -382,10 +372,14 @@ def match_built_in(command):
             return
 
 def var(var_command):
+    # Validate variable name
+
+
     # Check for the -s flag
     if var_command[1][0] == '-':
         if var_command[1] != '-s':
-            error = re.sub(r's', '', var_command[1])
+            invalid_option = var_command[1].replace("-", "")
+            error = "-" + re.match(r'[^s]', invalid_option).group(0)
             if error:
                 sys.stderr.write("var: invalid option: " + error + "\n")
             return
@@ -397,12 +391,11 @@ def var(var_command):
         var_name = var_command[0]
         command_str = var_command[1]
 
-
         # Split and parse the command string
         split_commands = split_by_pipe_op(command_str)
-        parsed_commands = format(split_commands)
+        parsed_commands = split_and_format_arguments(split_commands)
         #runs piped commands and places output into environment variable 'OUTPUT'
-        run_command_and_capture_output(parsed_commands)
+        run_commands_and_capture_output(parsed_commands)
 
     else:
         var_command.remove('var')
@@ -412,13 +405,12 @@ def var(var_command):
         var_name, var_value = var_command
         os.environ['OUTPUT'] = var_value
 
-    # Validate variable name
     if not re.match(r'^[A-Za-z0-9_]+$', var_name):
         sys.stderr.write(f"var: invalid characters for variable {var_name}\n")
         return
-
     # Set the environment variable
     os.environ[var_name] = os.environ['OUTPUT']
+    return
 
 def pwd(command):
     if len(command) != 1:
@@ -426,11 +418,12 @@ def pwd(command):
             sys.stdout.write(os.path.realpath(os.environ['PWD']) + '\n')
             return
         if command[1][0] == '-':
-            sys.stderr.write("pwd: invalid option: " + command[1].replace('p', '') + "\n")
+            sys.stderr.write("pwd: invalid option: " + command[1].replace("p", "") + "\n")
         else:
             sys.stderr.write("pwd: not expecting any arguments\n")
         return
     sys.stdout.write(os.environ['PWD'] + '\n')
+    return
 
 def cd(command):
 
@@ -473,7 +466,7 @@ def which(command):
 
     for i in arguments:
 
-        if check_if_built_in(i):
+        if check_if_built_in_command(i):
             sys.stdout.write(i + ': shell built-in command\n')
             continue
 
@@ -488,6 +481,7 @@ def which(command):
             continue
 
         sys.stdout.write(i + ' not found\n')
+    return
 
 def exit_cmd(command):
     if len(command) > 2:
