@@ -3,6 +3,8 @@ import os
 import re
 import signal
 import sys
+import shlex
+from glob import escape
 
 from parsing import split_by_pipe_op, split_and_format_arguments, run_commands
 
@@ -61,6 +63,25 @@ def initialise_shell() -> None:
     except KeyError:
         os.environ['MYSH_VERSION'] = '1.0'
 
+def split_preserve_quotes(s):
+    # Regular expression to match words or quoted substrings
+    pattern = re.compile(r'\"[^\"]*\"|\'[^\']*\'|\S+')
+    return pattern.findall(s)
+
+def process_commands(cmds_split_by_pipes):
+    quotes_escaped_cmds = []
+    for j in cmds_split_by_pipes:
+        temp_split = []
+        j = j.strip()
+        split_list = split_preserve_quotes(j)
+        for i in split_list:
+            if i.startswith('"') and i.endswith('"'):
+                i = '\\"' + i[1:-1] + '\\"'
+            elif i.startswith("'") and i.endswith("'"):
+                i = "\\'" + i[1:-1] + "\\'"
+            temp_split.append(i)
+        quotes_escaped_cmds.append(' '.join(temp_split))
+    return quotes_escaped_cmds
 
 
 def main() -> None:
@@ -81,16 +102,27 @@ def main() -> None:
 
         cmds_split_by_pipes = split_by_pipe_op(user_input)
 
+
+        quotes_escaped_cmds = process_commands(cmds_split_by_pipes)
+
+        print(quotes_escaped_cmds)
+
+
         escaped_cmds = []
 
-        for i in cmds_split_by_pipes:
-            if re.search(r'\\\$\{.*?\}', i):
+        for i in quotes_escaped_cmds:
+            if re.search(r'\\\$\{.*?\}', i) and "'" not in i and '"' not in i:
                 escaped_cmd = i.replace('\\', "'\\").replace('}', "}'")
                 escaped_cmds.append(escaped_cmd)
             else:
                 escaped_cmds.append(i)
 
+        print(escaped_cmds)
+
         parsed_commands = split_and_format_arguments(escaped_cmds)
+
+        print(parsed_commands)
+
 
         if any(len(sublist) == 0 for sublist in parsed_commands):
             sys.stderr.write("mysh: syntax error: expected command after pipe\n")

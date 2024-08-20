@@ -92,12 +92,13 @@ def split_by_pipe_op(cmd_str: str) -> list[str]:
 def split_and_format_arguments(commands):
     parsed = []
     for i in commands:
-
+        print(i)
         s = shlex.shlex(i, posix=True)
         s.whitespace_split = True
-        s.escapedquotes = "\\\\\\\\'\\\\\\\\\""
+        s.escapedquotes = "'\""
         s.quotes = "'\""
-        s.escape = ''
+        s.escape = '\\'
+        s.commenters = ''
         try :
             parsed.append(list(s))
         except ValueError:
@@ -107,6 +108,10 @@ def split_and_format_arguments(commands):
 
 def text_to_variable(text):
     if re.search(r'\\\${.*?}', text):
+        if text.startswith('"') and text.endswith('"'):
+            text = text[1:-1]
+        elif text.startswith("'") and text.endswith("'"):
+            text = text[1:-1]
         fixed_text = re.sub(r'[\\]', '', text)
     elif re.search(r'\${.*?}', text):
         variable = re.search(r'\${(.*?)}', text).group(1)
@@ -114,12 +119,20 @@ def text_to_variable(text):
             sys.stderr.write(f"mysh: syntax error: invalid characters for variable {variable}\n")
             return
         try:
-            fixed_text = re.sub(r'\${' + variable + '}', os.environ[variable], text)
+            if text.startswith('"') and text.endswith('"') or text.startswith("'") and text.endswith("'"):
+                environ_variable = os.environ[variable]
+            else:
+                environ_variable = os.environ[variable].strip()
+            fixed_text = re.sub(r'\${' + variable + '}', environ_variable, text)
         except KeyError:
             fixed_text = re.sub(r'\${' + variable + '}', '', text)
         if re.search(r'\${.*?}', text):
             fixed_text = text_to_variable(fixed_text)
     else:
+        if text.startswith('"') and text.endswith('"'):
+            text = text[1:-1]
+        elif text.startswith("'") and text.endswith("'"):
+            text = text[1:-1]
         if re.search(r'^~', text):
             text = re.sub(r'~', os.environ['HOME'], text)
         fixed_text = text
@@ -329,7 +342,7 @@ def run_commands_and_capture_output(command):
 
     #output of the last command is captured and placed into the environment variable 'OUTPUT'
     with os.fdopen(pipe_fds[i][0]) as r:
-        output = r.read().strip()
+        output = r.read()
         os.environ['OUTPUT'] = output
     return
 
