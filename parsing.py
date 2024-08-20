@@ -92,12 +92,12 @@ def split_by_pipe_op(cmd_str: str) -> list[str]:
 def split_and_format_arguments(commands):
     parsed = []
     for i in commands:
+
         s = shlex.shlex(i, posix=True)
         s.whitespace_split = True
-        # s.escapedquotes = "'\""
-        # s.quotes = "'\""
+        s.escapedquotes = "\\\\\\\\'\\\\\\\\\""
+        s.quotes = "'\""
         s.escape = ''
-        # s.wordchars += '\\'
         try :
             parsed.append(list(s))
         except ValueError:
@@ -105,30 +105,35 @@ def split_and_format_arguments(commands):
             sys.stderr.flush()
     return parsed
 
+def text_to_variable(text):
+    if re.search(r'\\\${.*?}', text):
+        fixed_text = re.sub(r'[\\]', '', text)
+    elif re.search(r'\${.*?}', text):
+        variable = re.search(r'\${(.*?)}', text).group(1)
+        if not re.match(r'^[A-Za-z0-9_]+$', variable):
+            sys.stderr.write(f"mysh: syntax error: invalid characters for variable {variable}\n")
+            return
+        try:
+            fixed_text = re.sub(r'\${' + variable + '}', os.environ[variable], text)
+        except KeyError:
+            fixed_text = re.sub(r'\${' + variable + '}', '', text)
+        if re.search(r'\${.*?}', text):
+            fixed_text = text_to_variable(fixed_text)
+    else:
+        if re.search(r'^~', text):
+            text = re.sub(r'~', os.environ['HOME'], text)
+        fixed_text = text
+
+    return fixed_text
+
+
 def check_for_variables(command):
     checked_variables = []
     checked_variables.append(command[0])
     arguments = command[1:]
     for i in arguments:
-        if re.search(r'\\\${.*?}', i):
-            fixed_command = re.sub(r'[\\]', '', i)
-        elif re.search(r'\${.*?}', i):
-            variable = re.search(r'\${(.*?)}', i).group(1)
-            if not re.match(r'^[A-Za-z0-9_]+$', variable):
-                sys.stderr.write(f"mysh: syntax error: invalid characters for variable {variable}\n")
-                return
-            try:
-                fixed_command = re.sub(r'\${' + variable + '}', os.environ[variable], i)
-            except KeyError:
-                fixed_command = re.sub(r'\${' + variable + '}', '', i)
-
-        else:
-            if re.search(r'^~', i):
-                i = re.sub(r'~', os.environ['HOME'], i)
-            fixed_command = i
-
+        fixed_command = text_to_variable(i)
         checked_variables.append(fixed_command)
-
     return checked_variables
 
 def check_file_exists(filename):
@@ -150,6 +155,7 @@ def check_file_exists(filename):
         path = ""
         found_dir = False
         for i in paths:
+            i = text_to_variable(i)
             for root, dirs, files in os.walk(i):
                 if filename in files:
                     existing_path.append(os.path.join(root, filename))
@@ -264,6 +270,8 @@ def run_piped_commands(raw_command):
 
     for i in raw_command:
         checked = check_for_variables(i)
+        if None in checked:
+            return
         commands.append(checked)
 
     num_commands = len(commands)
@@ -286,7 +294,6 @@ def run_piped_commands(raw_command):
         elif i == num_commands - 1:
             # Final command, execute directly
             pipe_command(cmd, pipe_fds[i-1][0], 1)
-
         else:
             pipe_command(cmd, pipe_fds[i-1][0], pipe_fds[i][1])
 
@@ -301,6 +308,9 @@ def run_commands_and_capture_output(command):
     for i, cmd in enumerate(command):
 
         cmd = check_for_variables(cmd)
+
+        if None in cmd:
+            return
 
         if check_if_built_in_command(cmd[0]):
             match_single_command(cmd)
@@ -343,7 +353,7 @@ def match_single_command(command):
 
     command = check_for_variables(command)
 
-    if command == None:
+    if None in command:
         return
 
     match command[0]:
@@ -373,7 +383,7 @@ def match_single_command(command):
 
 def var(var_command):
     # Validate variable name
-    
+
 
     # Check for the -s flag
     if var_command[1][0] == '-':
@@ -432,13 +442,16 @@ def cd(command):
         return
     if len(command) == 1:
         os.environ['PWD'] = os.environ['HOME']
+        os.chdir(os.environ['HOME'])
         return
     path = command[1]
     if path == '..':
         os.environ['PWD'] = os.path.dirname(os.environ['PWD'])
+        os.chdir(os.path.dirname(os.environ['PWD']))
         return
     if path == '~':
         os.environ['PWD'] = os.environ['HOME']
+        os.chdir(os.environ['HOME'])
         return
     if os.path.isabs(path):
         abspath = path
@@ -454,6 +467,8 @@ def cd(command):
         sys.stderr.write('cd: permission denied: ' + abspath + '\n')
         return
     os.environ['PWD'] = abspath
+    os.chdir(abspath)
+
     return
 
 def which(command):

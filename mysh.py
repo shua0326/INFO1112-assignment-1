@@ -18,10 +18,6 @@ def setup_signals() -> None:
 
 
 def initialise_shell() -> None:
-    os.environ["PWD"] = os.getcwd()
-    os.environ['PROMPT'] = '>> '
-    os.environ['MYSH_VERSION'] = '1.0'
-
     try:
         path = os.environ['MYSHDOTDIR']
     except KeyError:
@@ -37,7 +33,7 @@ def initialise_shell() -> None:
             if not re.match(r'^[A-Za-z0-9_]+$', variable_name):
                 sys.stderr.write(f"mysh: .myshrc: {variable_name}: invalid characters for variable name\n")
                 continue
-            if re.search(r'[0-9]', variable_name) or type(variable_name) == int:
+            if type(variable_name) != str or type(value) != str:
                 sys.stderr.write(f"mysh: .myshrc: {variable_name}: not a string\n")
                 continue
             os.environ[variable_name] = value
@@ -52,6 +48,19 @@ def initialise_shell() -> None:
         os.environ['PATH']
     except KeyError:
         os.environ['PATH'] = os.defpath
+    try:
+        os.environ['PROMPT']
+    except KeyError:
+        os.environ['PROMPT'] = '>> '
+    try:
+        os.environ['PWD']
+    except KeyError:
+        os.environ['PWD'] = os.getcwd()
+    try:
+        os.environ['MYSH_VERSION']
+    except KeyError:
+        os.environ['MYSH_VERSION'] = '1.0'
+
 
 
 def main() -> None:
@@ -72,7 +81,16 @@ def main() -> None:
 
         cmds_split_by_pipes = split_by_pipe_op(user_input)
 
-        parsed_commands = split_and_format_arguments(cmds_split_by_pipes)
+        escaped_cmds = []
+
+        for i in cmds_split_by_pipes:
+            if re.search(r'\\\$\{.*?\}', i):
+                escaped_cmd = i.replace('\\', "'\\").replace('}', "}'")
+                escaped_cmds.append(escaped_cmd)
+            else:
+                escaped_cmds.append(i)
+
+        parsed_commands = split_and_format_arguments(escaped_cmds)
 
         if any(len(sublist) == 0 for sublist in parsed_commands):
             sys.stderr.write("mysh: syntax error: expected command after pipe\n")
