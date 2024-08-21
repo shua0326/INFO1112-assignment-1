@@ -92,13 +92,11 @@ def split_by_pipe_op(cmd_str: str) -> list[str]:
 def split_and_format_arguments(commands):
     parsed = []
     for i in commands:
-        print(i)
         s = shlex.shlex(i, posix=True)
         s.whitespace_split = True
-        s.escapedquotes = "'\""
+        s.escapedquotes = "\\\\\\\\'\\\\\\\\\""
         s.quotes = "'\""
         s.escape = '\\'
-        s.commenters = ''
         try :
             parsed.append(list(s))
         except ValueError:
@@ -108,10 +106,6 @@ def split_and_format_arguments(commands):
 
 def text_to_variable(text):
     if re.search(r'\\\${.*?}', text):
-        if text.startswith('"') and text.endswith('"'):
-            text = text[1:-1]
-        elif text.startswith("'") and text.endswith("'"):
-            text = text[1:-1]
         fixed_text = re.sub(r'[\\]', '', text)
     elif re.search(r'\${.*?}', text):
         variable = re.search(r'\${(.*?)}', text).group(1)
@@ -119,20 +113,18 @@ def text_to_variable(text):
             sys.stderr.write(f"mysh: syntax error: invalid characters for variable {variable}\n")
             return
         try:
-            if text.startswith('"') and text.endswith('"') or text.startswith("'") and text.endswith("'"):
-                environ_variable = os.environ[variable]
+            if "'" in text or '"' in text:
+                fixed_text = re.sub(r'\${' + variable + '}', os.environ[variable], text)
+                fixed_text = fixed_text.replace("'", '')
+                fixed_text = fixed_text.replace('"', '')
             else:
-                environ_variable = os.environ[variable].strip()
-            fixed_text = re.sub(r'\${' + variable + '}', environ_variable, text)
+                fixed_text = re.sub(r'\${' + variable + '}', os.environ[variable].rstrip('\n'), text)
+                fixed_text = re.sub(r'["\']', '', fixed_text)
         except KeyError:
             fixed_text = re.sub(r'\${' + variable + '}', '', text)
         if re.search(r'\${.*?}', text):
             fixed_text = text_to_variable(fixed_text)
     else:
-        if text.startswith('"') and text.endswith('"'):
-            text = text[1:-1]
-        elif text.startswith("'") and text.endswith("'"):
-            text = text[1:-1]
         if re.search(r'^~', text):
             text = re.sub(r'~', os.environ['HOME'], text)
         fixed_text = text
@@ -342,8 +334,8 @@ def run_commands_and_capture_output(command):
 
     #output of the last command is captured and placed into the environment variable 'OUTPUT'
     with os.fdopen(pipe_fds[i][0]) as r:
-        output = r.read()
-        os.environ['OUTPUT'] = output
+        output = r.read().strip()
+        os.environ['OUTPUT'] = output + '\n'
     return
 
 def run_commands(command_line):
@@ -432,6 +424,7 @@ def var(var_command):
         sys.stderr.write(f"var: invalid characters for variable {var_name}\n")
         return
     # Set the environment variable
+
     os.environ[var_name] = os.environ['OUTPUT']
     return
 
