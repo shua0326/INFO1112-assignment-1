@@ -1,0 +1,9 @@
+ls .. | grep ".py$"
+which ls grep
+var old_path ${PATH}
+var PATH ""
+which ls grep
+echo ${PATH}
+var PATH ${old_path}
+which ls grep
+ls

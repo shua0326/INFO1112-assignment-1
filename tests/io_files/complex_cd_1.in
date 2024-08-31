@@ -1,0 +1,10 @@
+pwd
+cd io_files
+pwd
+cd 
+pwd
+cd non_existant
+pwd
+ls
+cd tests
+pwd

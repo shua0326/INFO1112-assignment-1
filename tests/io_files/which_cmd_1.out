@@ -1,0 +1,6 @@
+>> /usr/sbin/ls
+no_exist not found
+cd: shell built-in command
+pwd: shell built-in command
+/usr/sbin/grep
+>> 

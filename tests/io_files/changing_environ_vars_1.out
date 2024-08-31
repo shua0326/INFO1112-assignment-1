@@ -1,0 +1,8 @@
+>> hi this is the default prompt
+>> new prompt!!$ something is different
+new prompt!!$ running ls to find .py files !
+new prompt!!$ mysh.py
+parsing.py
+new prompt!!$ path will be empty now
+new prompt!!$ new prompt!!$ mysh: command not found: ls
+new prompt!!$ 

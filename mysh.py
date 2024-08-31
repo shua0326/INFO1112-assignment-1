@@ -26,14 +26,14 @@ def initialise_shell() -> None:
     path += '/.myshrc'
 
     try:
-        with open(path, 'r') as init_file:
+        with open(path, 'r', encoding="utf-8") as init_file:
             lines = json.load(init_file)
 
         for variable_name, value in lines.items():
             if not re.match(r'^[A-Za-z0-9_]+$', variable_name):
                 sys.stderr.write(f"mysh: .myshrc: {variable_name}: invalid characters for variable name\n")
                 continue
-            if type(variable_name) != str or type(value) != str:
+            if not isinstance(variable_name, str) or not isinstance(value, str):
                 sys.stderr.write(f"mysh: .myshrc: {variable_name}: not a string\n")
                 continue
             os.environ[variable_name] = value
@@ -62,7 +62,7 @@ def initialise_shell() -> None:
         os.environ['MYSH_VERSION'] = '1.0'
 
 
-def process_command(cmd):
+def process_command(cmd: str) -> str:
     pattern = r'([\'"])\$\{.*?\}\1'
     def replace_quotes(match):
         inner_content = match.group()[1:-1]  # Remove the original quotes

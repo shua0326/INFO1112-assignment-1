@@ -4,7 +4,6 @@ Module to handle parsing for the shell.
 import os
 import re
 import shlex
-import signal
 import sys
 
 # You are free to add functions or modify this module as you please.
@@ -133,8 +132,7 @@ def text_to_variable(text):
 
 
 def check_for_variables(command):
-    checked_variables = []
-    checked_variables.append(command[0])
+    checked_variables = [command[0]]
     arguments = command[1:]
     for i in arguments:
         fixed_command = text_to_variable(i)
@@ -164,7 +162,7 @@ def check_file_exists(filename):
             for root, dirs, files in os.walk(i):
                 if filename in files:
                     existing_path.append(os.path.join(root, filename))
-                if filename in root:
+                if filename in dirs:
                     found_dir = True
 
         if existing_path:
@@ -199,12 +197,12 @@ def run_exec(command):
     if pid == 0:
         # Child process
         os.close(w)
-        signal = os.read(r, 1)
+        con_signal = os.read(r, 1)
         os.close(r)
 
         #waits for parent to finish setting new process group before executing
-        while not signal:
-            signal = os.read(r, 1)
+        while not con_signal:
+            con_signal = os.read(r, 1)
 
         if len(command) == 1:
             os.execv(path, [filename])
@@ -217,7 +215,7 @@ def run_exec(command):
         child_pgid = os.getpgid(pid)
         parent_pgid = os.getpgrp()
 
-        with open('/dev/tty') as tty:
+        with open('/dev/tty', encoding="utf-8") as tty:
             fd = tty.fileno()
             os.tcsetpgrp(fd, child_pgid)
             os.write(w, b'1')  # Write to the pipe to signal the child
@@ -233,12 +231,12 @@ def pipe_command(command, newin, newout):
     if pid == 0:
         # Child process
         os.close(w)
-        signal = os.read(r, 1)
+        con_signal = os.read(r, 1)
         os.close(r)
 
         #waits for parent to finish setting new process group before executing
-        while not signal:
-            signal = os.read(r, 1)
+        while not con_signal:
+            con_signal = os.read(r, 1)
 
         os.dup2(newin, 0)  # Replace stdin
         os.dup2(newout, 1)  # Replace stdout
@@ -250,14 +248,13 @@ def pipe_command(command, newin, newout):
         child_pgid = os.getpgid(pid)
         parent_pgid = os.getpgrp()
 
-        with open('/dev/tty') as tty:
+        with open('/dev/tty', encoding="utf-8") as tty:
             fd = tty.fileno()
             os.tcsetpgrp(fd, child_pgid)
             os.write(w, b'1')  # Write to the pipe to signal the child to continue
             os.close(w)
             os.waitpid(child_pgid, 0)
             os.tcsetpgrp(fd, parent_pgid)
-    return
 
 def create_pipes(commands):
     num_commands = len(commands)
@@ -290,7 +287,7 @@ def run_piped_commands(raw_command):
             match_single_command(cmd)
             continue
 
-        path, cmd_exists = check_file_exists(cmd[0])
+        cmd_exists = check_file_exists(cmd[0])[1]
         if not cmd_exists:
             return
 
@@ -321,7 +318,7 @@ def run_commands_and_capture_output(command):
             match_single_command(cmd)
             continue
 
-        path, cmd_exists = check_file_exists(cmd[0])
+        cmd_exists = check_file_exists(cmd[0])[1]
         if not cmd_exists:
             return
 
@@ -451,13 +448,13 @@ def cd(command):
         os.chdir(os.environ['HOME'])
         return
     path = command[1]
-    if path == '..':
-        os.environ['PWD'] = os.path.dirname(os.environ['PWD'])
-        os.chdir(os.path.dirname(os.environ['PWD']))
-        return
     if path == '~':
         os.environ['PWD'] = os.environ['HOME']
         os.chdir(os.environ['HOME'])
+        return
+    if path == '..':
+        os.environ['PWD'] = os.path.dirname(os.environ['PWD'])
+        os.chdir(os.path.dirname(os.environ['PWD']))
         return
     if os.path.isabs(path):
         abspath = path
@@ -491,7 +488,7 @@ def which(command):
             sys.stdout.write(i + ': shell built-in command\n')
             continue
 
-        sys.stderr = open(os.devnull, 'w')
+        sys.stderr = open(os.devnull, 'w', encoding="utf-8")
 
         path, found_in_path = check_file_exists(i)
 

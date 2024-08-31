@@ -1,0 +1,8 @@
+echo hi this is the default prompt
+var PROMPT "new prompt!!$ " 
+echo something is different
+echo running ls to find .py files !
+ls .. | grep ".py$"
+echo path will be empty now
+var PATH ""
+ls ..

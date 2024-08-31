@@ -1,0 +1,2 @@
+var -s pipe "ls .. | grep '.py$' |  wc -l"
+echo ${pipe}

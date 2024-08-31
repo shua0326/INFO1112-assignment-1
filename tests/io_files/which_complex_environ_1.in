@@ -1,0 +1,5 @@
+which ls cd
+var PATH ""
+which ls pwd
+var PATH "/usr/sbin"
+which ls echo

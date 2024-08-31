@@ -1,0 +1,7 @@
+>> /usr/sbin/ls
+cd: shell built-in command
+>> >> ls not found
+pwd: shell built-in command
+>> >> /usr/sbin/ls
+/usr/sbin/echo
+>> 

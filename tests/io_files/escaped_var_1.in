@@ -1,0 +1,3 @@
+var greeting Hello
+echo ${greeting}
+echo \${greeting}

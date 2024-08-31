@@ -1,0 +1,6 @@
+echo hi
+var -s number_text "sort words.txt | grep '[asdfghjkl]' | wc -l"
+echo ${number_text}
+var -s new_prompt "sort words.txt | grep '[ghjdks]' | sort -r | head -1 | awk {print$6}"
+echo ${new_prompt}
+ls
